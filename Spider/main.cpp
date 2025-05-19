@@ -70,7 +70,13 @@ void create_tables() {
 }
 
 // Функция для загрузки страницы
-std::string load_page(const std::string& url) {
+std::string load_page(const std::string& url, int redirect_count = 0) {
+    const int max_redirects = 5; // Максимальное число редиректов
+    if (redirect_count > max_redirects) {
+        std::cerr << "Превышено число редиректов для URL: " << url << std::endl;
+        return "";
+    }
+    std::string result_data; // сюда будем накапливать скачанный контент
     try {
         // Разбор URL
         auto scheme_end = url.find("://");
@@ -105,7 +111,13 @@ std::string load_page(const std::string& url) {
             // Подключение
             net::connect(stream.next_layer(), results.begin(), results.end());
 
-            // Выполнение рукопожатия SSL
+           // Задаем имя хоста SNI для успешного установления связи
+            if(!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
+            {
+                boost::system::error_code ec{static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()};
+                throw boost::system::system_error{ec};
+            }
+             // Выполнение рукопожатия SSL
             stream.handshake(boost::asio::ssl::stream_base::client);
 
             // Формируем HTTP-запрос
@@ -113,49 +125,106 @@ std::string load_page(const std::string& url) {
             req.set(http::field::host,host);
             req.set(http::field::user_agent,"Boost.Beast");
 
-            // Отправляем запрос
-            http::write(stream, req);
+            try {
+                // Отправляем запрос
+                http::write(stream, req);
 
-            // Получаем ответ
-            beast::flat_buffer buffer;
-            http::response<http::string_body> res;
-            http::read(stream, buffer, res);
+                // Получаем ответ
+                beast::flat_buffer buffer;
+                http::response<http::string_body> res;
+                http::read(stream, buffer, res);
 
-            // Закрываем соединение
-            beast::error_code ec;
-            stream.shutdown(ec);
-            if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
-                throw beast::error_code(ec);
+                if (res.result_int() >= 300 && res.result_int() < 400) { //статус код в диапозоне 300-399 указывает на редирект
+                    // Обработка редиректа
+                    auto location_iter = res.find(http::field::location); //ищем поле location с url
+                    if (location_iter != res.end()) {
+                        std::string new_url(location_iter->value().data(), location_iter->value().size()); //делаем строку из location
+    
+                        // Если редирект относительный, нужно его корректировать
+                        if (new_url.find("://") == std::string::npos) {
+                            // Относительный путь — добавляем схему и хост
+                            new_url = scheme + "://" + host + new_url;
+                        }
+                        // Закрываем соединение перед рекурсивным вызовом
+                        beast::error_code ec;
+                        stream.shutdown(ec);
+                        if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
+                            throw beast::error_code(ec);
+                        }
+                        return load_page(new_url, redirect_count + 1);
+                    }
+                }
+
+                result_data = res.body();
+
+                // Закрываем соединение
+                beast::error_code ec;
+                stream.shutdown(ec);
+                if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
+                    throw beast::error_code(ec);
+                }
+            } catch (const beast::error_code& ec) {
+                // Обработка ошибок чтения/завершения соединения
+                if (ec != boost::asio::error::operation_aborted && ec != beast::errc::connection_reset) {
+                    throw; // перекидываем остальные ошибки
+                }
+                // В случае разрыва соединения — возвращаем то, что есть
+                return result_data;
             }
 
-            return res.body();
         } else {
             // HTTP без TLS
             boost::asio::ip::tcp::resolver resolver(ioc);
             
             auto results=resolver.resolve(host,"80");
-            boost ::beast ::tcp_stream stream(ioc);
-            net ::connect(stream.socket(),results.begin(),results.end());
+            boost::beast::tcp_stream stream(ioc);
+            net::connect(stream.socket(),results.begin(),results.end());
              
-            http ::request<http ::string_body>req{http ::verb ::get,target,11};
-            req.set(http ::field ::host,host);
-            req.set(http ::field ::user_agent,"Boost.Beast");
+            http::request<http::string_body>req{http::verb::get,target,11};
+            req.set(http::field::host,host);
+            req.set(http::field::user_agent,"Boost.Beast");
+            try {
+                
+                http::write(stream,req);
              
-            http ::write(stream,req);
+                beast::flat_buffer buffer;
+                http::response<http::string_body>res;
+                http::read(stream,buffer,res);
+
+                if (res.result_int() >= 300 && res.result_int() < 400) { 
+                    auto location_iter = res.find(http::field::location); 
+                    if (location_iter != res.end()) {
+                        std::string new_url(location_iter->value().data(), location_iter->value().size()); 
+                        if (new_url.find("://") == std::string::npos) {
+                            new_url = "http://" + host + new_url;
+                        }
+                        beast::error_code ec;
+                        stream.socket().shutdown(tcp::socket::shutdown_both ,ec);
+                        if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
+                            throw beast::error_code(ec);
+                        }
+                        return load_page(new_url, redirect_count+1);
+                    }
+                }
+
+                result_data = res.body();
              
-            beast ::flat_buffer buffer;
-            http ::response<http ::string_body>res;
-            http ::read(stream,buffer,res);
-             
-            beast ::error_code ec;
-            stream.socket().shutdown(tcp ::socket ::shutdown_both,ec);
-             
-            return res.body();
+                beast::error_code ec;
+                stream.socket().shutdown(tcp::socket::shutdown_both,ec);
+                if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
+                    throw beast::error_code(ec);
+                }
+            } catch (const beast::error_code& ec) {
+                if (ec != boost::asio::error::operation_aborted && ec != beast::errc::connection_reset) {
+                    throw; // остальные ошибки — пробрасываем дальше
+                }
+                return result_data; // возвращаем что есть при ошибке соединения
+            }
         }
     } catch (const std::exception& e) {
         std::cerr << "Ошибка: " << e.what() << std::endl;
     }
-    return "";
+    return result_data;
 }
 
 // Функция для извлечения ссылок из HTML-контента
@@ -262,6 +331,7 @@ void worker() {
     }
  }
 
+ 
  // Основная функция
 int main() {
 
