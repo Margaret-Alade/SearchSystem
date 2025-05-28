@@ -106,6 +106,7 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
 
             // Разрешение
             boost::asio::ip::tcp::resolver resolver(ioc);
+
             auto results = resolver.resolve(host, "443");
 
             // Подключение
@@ -176,7 +177,7 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
             // HTTP без TLS
             boost::asio::ip::tcp::resolver resolver(ioc);
             
-            auto results=resolver.resolve(host,"80");
+            auto results = resolver.resolve(host,"80");
             boost::beast::tcp_stream stream(ioc);
             net::connect(stream.socket(),results.begin(),results.end());
              

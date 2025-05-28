@@ -54,7 +54,7 @@ std::vector<std::pair<int, std::string>> search_documents(const std::vector<std:
         // Важно: параметры должны быть в том же порядке, что и плейсхолдеры
         std::vector<std::string> params = search_words; // просто копируем
 
-        auto r = W.exec_prepared("search_words", params.begin(), params.end());
+        auto r = W.exec("search_words");
 
         for (const auto& row : r) {
             int doc_id = row[0].as<int>();
