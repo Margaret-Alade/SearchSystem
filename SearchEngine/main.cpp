@@ -162,7 +162,7 @@ http::response<http::string_body> handle_request(const http::request<Body>& req)
             res.set(http::field::content_type, "text/plain");
             return res;
         }
-    } catch(const std::exception & e){
+    } catch(const std::exception & e) {
         http::response<http::string_body> res{http::status::internal_server_error, 0};
         res.body() = "<h1>Внутренняя ошибка</h1>";
         res.prepare_payload();
