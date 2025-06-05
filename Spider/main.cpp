@@ -13,6 +13,8 @@
 #include <pqxx/pqxx>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
+#include <boost/url.hpp>
+#include <boost/system/result.hpp>
 #include <regex>
 #include <locale>
 #include <algorithm>
@@ -77,6 +79,7 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
         return "";
     }
     std::string result_data; // сюда будем накапливать скачанный контент
+
     try {
         // Разбор URL
         auto scheme_end = url.find("://");
@@ -100,6 +103,32 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
             target = "/";
         }
 
+        auto should_ignore_link = [](const std::string& url) {
+            // Игнорируем якоря типа #About
+            if (url.empty()) return true;
+            if (url[0] == '#') return true;
+        
+            // Игнорируем javascript:
+            if (url.find("javascript:") == 0) return true;
+        
+            // Игнорируем mailto:
+            if (url.find("mailto:") == 0) return true;
+        
+            // Игнорируем ссылки на печать или другие нежелательные
+            // Например, если есть "print" в URL
+            std::string lower_url = url;
+            std::transform(lower_url.begin(), lower_url.end(), lower_url.begin(), ::tolower);
+            if (lower_url.find("print") != std::string::npos) return true;
+        
+            return false;
+        };
+        
+        // Перед обработкой редиректа или возвратом содержимого
+        if (should_ignore_link(target)) {
+            // Возвращаем пустую строку или сообщение о том, что ссылка игнорируется
+            return "";
+        }
+
         if (scheme == "https") {
             // Создаем SSL поток
             boost::asio::ssl::stream<tcp::socket> stream(ioc, ctx);
@@ -107,7 +136,9 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
             // Разрешение
             boost::asio::ip::tcp::resolver resolver(ioc);
 
+            std::cout << "Trying to resolve: " << host << std::endl;
             auto results = resolver.resolve(host, "443");
+            std::cout << host << " successfully resolved" << std::endl;
 
             // Подключение
             net::connect(stream.next_layer(), results.begin(), results.end());
@@ -139,20 +170,21 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                     // Обработка редиректа
                     auto location_iter = res.find(http::field::location); //ищем поле location с url
                     if (location_iter != res.end()) {
-                        std::string new_url(location_iter->value().data(), location_iter->value().size()); //делаем строку из location
-    
-                        // Если редирект относительный, нужно его корректировать
-                        if (new_url.find("://") == std::string::npos) {
-                            // Относительный путь — добавляем схему и хост
-                            new_url = scheme + "://" + host + new_url;
+                        std::string location_value(location_iter->value().data(), location_iter->value().size());
+                        // Обработка относительных ссылок
+                        try {
+                            auto parse_result = boost::urls::parse_uri(url);
+                            boost::urls::url base = *parse_result;
+                            auto location_view = boost::urls::parse_relative_ref(location_value);
+                            auto resolved_url = base.resolve(*location_view);
+                            std::string new_url = resolved_url.buffer();
+                            // Перед рекурсивным вызовом передаем новый полный URL
+                            return load_page(new_url, redirect_count + 1);
+
+                        } catch (const std::exception& e) {
+                            std::cerr << "Ошибка при разрешении URL: " << e.what() << std::endl;
+                            return "";
                         }
-                        // Закрываем соединение перед рекурсивным вызовом
-                        beast::error_code ec;
-                        stream.shutdown(ec);
-                        if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
-                            throw beast::error_code(ec);
-                        }
-                        return load_page(new_url, redirect_count + 1);
                     }
                 }
 
@@ -176,8 +208,11 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
         } else {
             // HTTP без TLS
             boost::asio::ip::tcp::resolver resolver(ioc);
-            
+
+            std::cout << "Trying to resolve: " << host << std::endl;
             auto results = resolver.resolve(host,"80");
+            std::cout << host << "successfully resolved" << std::endl;
+
             boost::beast::tcp_stream stream(ioc);
             net::connect(stream.socket(),results.begin(),results.end());
              
@@ -195,16 +230,21 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                 if (res.result_int() >= 300 && res.result_int() < 400) { 
                     auto location_iter = res.find(http::field::location); 
                     if (location_iter != res.end()) {
-                        std::string new_url(location_iter->value().data(), location_iter->value().size()); 
-                        if (new_url.find("://") == std::string::npos) {
-                            new_url = "http://" + host + new_url;
+                        std::string location_value(location_iter->value().data(), location_iter->value().size());
+                        // Обработка относительных ссылок
+                        try {
+                            auto parse_result = boost::urls::parse_uri(url);
+                            boost::urls::url base = *parse_result;
+                            auto location_view = boost::urls::parse_relative_ref(location_value);
+                            auto resolved_url = base.resolve(*location_view);
+                            std::string new_url = resolved_url.buffer();
+                            // Перед рекурсивным вызовом передаем новый полный URL
+                            return load_page(new_url, redirect_count + 1);
+
+                        } catch (const std::exception& e) {
+                            std::cerr << "Ошибка при разрешении URL: " << e.what() << std::endl;
+                            return "";
                         }
-                        beast::error_code ec;
-                        stream.socket().shutdown(tcp::socket::shutdown_both ,ec);
-                        if (ec && ec != beast::error_code(boost::asio::error::operation_aborted)) {
-                            throw beast::error_code(ec);
-                        }
-                        return load_page(new_url, redirect_count+1);
                     }
                 }
 
@@ -321,6 +361,11 @@ void worker() {
  
         // Загружаем страницу и индексируем её содержимое
         auto html_content = load_page(url);
+
+        if (html_content.empty()) {
+            // Страница игнорируется или пуста — пропускаем
+            continue;
+        }
         index_page(url, html_content);
  
         // Извлекаем ссылки из загруженной страницы и добавляем их в очередь
