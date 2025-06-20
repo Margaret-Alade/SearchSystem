@@ -174,10 +174,10 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                         // Обработка относительных ссылок
                         try {
                             auto parse_result = boost::urls::parse_uri(url);
-                            boost::urls::url base = *parse_result;
+                            boost::urls::url base = parse_result.value();
                             auto location_view = boost::urls::parse_relative_ref(location_value);
-                            auto resolved_url = base.resolve(*location_view);
-                            std::string new_url = resolved_url.buffer();
+                            base.resolve(location_view.value());
+                            std::string new_url = base.buffer();
                             // Перед рекурсивным вызовом передаем новый полный URL
                             return load_page(new_url, redirect_count + 1);
 
@@ -234,10 +234,10 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                         // Обработка относительных ссылок
                         try {
                             auto parse_result = boost::urls::parse_uri(url);
-                            boost::urls::url base = *parse_result;
+                            boost::urls::url base = parse_result.value();
                             auto location_view = boost::urls::parse_relative_ref(location_value);
-                            auto resolved_url = base.resolve(*location_view);
-                            std::string new_url = resolved_url.buffer();
+                            base.resolve(location_view.value());
+                            std::string new_url = base.buffer();
                             // Перед рекурсивным вызовом передаем новый полный URL
                             return load_page(new_url, redirect_count + 1);
 
