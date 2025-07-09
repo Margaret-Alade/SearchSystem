@@ -109,7 +109,7 @@ http::response<http::string_body> handle_request(const http::request<Body>& req)
     try {
         if (req.method() == http::verb::get) {
             // Обработка GET-запроса. Возвращаем страницу формы поиска
-            auto res_req = http::response<http::string_body>{http::status::ok, 0};
+            auto res_req = http::response<http::string_body>{http::status::ok, 1};
             res_req.body() = generate_search_form();
             res_req.prepare_payload();
             res_req.set(http::field::content_type, "text/html");
@@ -133,7 +133,7 @@ http::response<http::string_body> handle_request(const http::request<Body>& req)
             }
 
             if (search_words.empty()) {
-                auto res_req = http::response<http::string_body>{http::status::ok, 0};
+                auto res_req = http::response<http::string_body>{http::status::ok, 1};
                 res_req.body() = generate_search_form();
                 res_req.prepare_payload();
                 res_req.set(http::field::content_type, "text/html");
@@ -143,13 +143,13 @@ http::response<http::string_body> handle_request(const http::request<Body>& req)
             auto res_docs = search_documents(search_words);
 
             if (res_docs.empty()) {
-                auto res_req = http::response<http::string_body>{http::status::ok, 0};
+                auto res_req = http::response<http::string_body>{http::status::ok, 1};
                 res_req.body() = generate_results_page(res_docs, true);
                 res_req.prepare_payload();
                 res_req.set(http::field::content_type, "text/html");
                 return res_req;
             } else {
-                auto res_req = http::response<http::string_body>{http::status::ok, 0};
+                auto res_req = http::response<http::string_body>{http::status::ok, 1};
                 res_req.body() = generate_results_page(res_docs);
                 res_req.prepare_payload();
                 res_req.set(http::field::content_type, "text/html");
