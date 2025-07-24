@@ -71,6 +71,33 @@ void create_tables() {
     }
 }
 
+//Функция для игнорирования ненужных ссылок
+auto should_ignore_link = [](const std::string& url) {
+    // Игнорируем якоря типа #About
+    if (url.empty()) return true;
+    if (url[0] == '#') return true;
+
+    // Игнорируем javascript:
+    if (url.find("javascript:") == 0) return true;
+
+    // Игнорируем mailto:
+    if (url.find("mailto:") == 0) return true;
+
+    // Игнорируем ссылки на печать или другие нежелательные
+    // Например, если есть "print" в URL
+    std::string lower_url = url;
+    std::transform(lower_url.begin(), lower_url.end(), lower_url.begin(), ::tolower);
+    if (lower_url.find("print") != std::string::npos) return true;
+
+    return false;
+};
+
+
+// Функция для проверки, является ли ссылка абсолютной
+bool is_absolute_url(const std::string& url) {
+    return url.find("https://") == 0 || url.find("http://");
+}
+
 // Функция для загрузки страницы
 std::string load_page(const std::string& url, int redirect_count = 0) {
     const int max_redirects = 5; // Максимальное число редиректов
@@ -102,26 +129,6 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
             host = url;
             target = "/";
         }
-
-        auto should_ignore_link = [](const std::string& url) {
-            // Игнорируем якоря типа #About
-            if (url.empty()) return true;
-            if (url[0] == '#') return true;
-        
-            // Игнорируем javascript:
-            if (url.find("javascript:") == 0) return true;
-        
-            // Игнорируем mailto:
-            if (url.find("mailto:") == 0) return true;
-        
-            // Игнорируем ссылки на печать или другие нежелательные
-            // Например, если есть "print" в URL
-            std::string lower_url = url;
-            std::transform(lower_url.begin(), lower_url.end(), lower_url.begin(), ::tolower);
-            if (lower_url.find("print") != std::string::npos) return true;
-        
-            return false;
-        };
         
         // Перед обработкой редиректа или возвратом содержимого
         if (should_ignore_link(target)) {
@@ -169,17 +176,33 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                 if (res.result_int() >= 300 && res.result_int() < 400) { //статус код в диапозоне 300-399 указывает на редирект
                     // Обработка редиректа
                     auto location_iter = res.find(http::field::location); //ищем поле location с url
-                    if (location_iter != res.end()) {
-                        std::string location_value(location_iter->value().data(), location_iter->value().size());
-                        // Обработка относительных ссылок
+                    if (location_iter != res.end()) { //если поле найдено
+                        std::string location_value(location_iter->value().data(), location_iter->value().size()); //превращаем поле location в строку
+                        // Обработка ссылок
                         try {
-                            auto parse_result = boost::urls::parse_uri(url);
-                            boost::urls::url base = parse_result.value();
-                            auto location_view = boost::urls::parse_relative_ref(location_value);
-                            base.resolve(location_view.value());
-                            std::string new_url = base.buffer();
-                            // Перед рекурсивным вызовом передаем новый полный URL
-                            return load_page(new_url, redirect_count + 1);
+                            // Проверяем, начинается ли URL с https://
+                            if (!is_absolute_url(location_value)) {
+                                // абсолютный URL
+                                auto parse_result = boost::urls::parse_absolute_uri(location_value); //парсим url
+                                if (!parse_result) {
+                                    throw std::runtime_error("Некорректный абсолютный URL");
+                                }
+                                boost::urls::url absolute_url = parse_result.value(); 
+                                // Перед рекурсивным вызовом обновляем полный URL
+                                std::string new_url = absolute_url.buffer(); 
+                                return load_page(new_url, redirect_count + 1);
+                            } else {
+                                // относительный URL
+                                auto parse_result = boost::urls::parse_relative_ref(location_value);
+                                if (!parse_result) {
+                                    throw std::runtime_error("Некорректная относительная ссылка");
+                                }
+                                boost::urls::url base_url = boost::urls::parse_uri(url).value();
+                                auto resolved_url = base_url;
+                                resolved_url.resolve(parse_result.value());//Разрешаем относительный путь относительно базового URL.
+                                std::string new_url = resolved_url.buffer(); //Получаем полный url
+                                return load_page(new_url, redirect_count + 1);
+                            }
 
                         } catch (const std::exception& e) {
                             std::cerr << "Ошибка при разрешении URL: " << e.what() << std::endl;
@@ -231,15 +254,31 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                     auto location_iter = res.find(http::field::location); 
                     if (location_iter != res.end()) {
                         std::string location_value(location_iter->value().data(), location_iter->value().size());
-                        // Обработка относительных ссылок
+                        // Обработка ссылок
                         try {
-                            auto parse_result = boost::urls::parse_uri(url);
-                            boost::urls::url base = parse_result.value();
-                            auto location_view = boost::urls::parse_relative_ref(location_value);
-                            base.resolve(location_view.value());
-                            std::string new_url = base.buffer();
-                            // Перед рекурсивным вызовом передаем новый полный URL
-                            return load_page(new_url, redirect_count + 1);
+                            // Проверяем, начинается ли URL с http://
+                            if (!is_absolute_url(location_value)) {
+                                // абсолютный URL
+                                auto parse_result = boost::urls::parse_absolute_uri(location_value); //парсим url
+                                if (!parse_result) {
+                                    throw std::runtime_error("Некорректный абсолютный URL");
+                                }
+                                boost::urls::url absolute_url = parse_result.value(); 
+                                // Перед рекурсивным вызовом обновляем полный URL
+                                std::string new_url = absolute_url.buffer(); 
+                                return load_page(new_url, redirect_count + 1);
+                            } else {
+                                // относительный URL
+                                auto parse_result = boost::urls::parse_relative_ref(location_value);
+                                if (!parse_result) {
+                                    throw std::runtime_error("Некорректная относительная ссылка");
+                                }
+                                boost::urls::url base_url = boost::urls::parse_uri(url).value();
+                                auto resolved_url = base_url;
+                                resolved_url.resolve(parse_result.value());//Разрешаем относительный путь относительно базового URL.
+                                std::string new_url = resolved_url.buffer(); //Получаем полный url
+                                return load_page(new_url, redirect_count + 1);
+                            }
 
                         } catch (const std::exception& e) {
                             std::cerr << "Ошибка при разрешении URL: " << e.what() << std::endl;
@@ -268,15 +307,41 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
     return result_data;
 }
 
+
+// Функция для объединения базового URL с относительной ссылкой
+std::string resolve_relative_link(const std::string& base_url_str, const std::string& link) {
+    try {
+        auto parse_result = boost::urls::parse_relative_ref(link);
+        if (!parse_result) return link; // если не удалось распарсить — возвращаем как есть
+        boost::urls::url base_url = boost::urls::parse_uri(base_url_str).value();
+        auto resolved_url = base_url;
+        resolved_url.resolve(parse_result.value());
+        std::string new_url = resolved_url.buffer(); //Получаем полный url
+        return new_url;
+
+    } catch (...) {
+        return link; // В случае ошибок возвращаем исходную ссылку
+    }
+}
+
 // Функция для извлечения ссылок из HTML-контента
-std::vector<std::string> extract_links(const std::string& html) {
+std::vector<std::string> extract_links(const std::string& html, const std::string& url) {
+
     std::vector<std::string> links;
     std::regex link_regex("<a\\s+(?:[^>]*?\\s+)?href=\"([^\"]*)\"");
     auto links_begin = std::sregex_iterator(html.begin(), html.end(), link_regex);
     auto links_end = std::sregex_iterator();
 
     for (std::sregex_iterator i = links_begin; i != links_end; ++i) {
-        links.push_back((*i)[1].str());
+        std::string href = (*i)[1].str();
+        if(should_ignore_link(href)) {
+            continue;
+        }
+        if (!is_absolute_url(href)) {
+            href = resolve_relative_link(url, href);
+        }
+
+        links.push_back(href);
     }
     
     return links;
@@ -369,7 +434,7 @@ void worker() {
         index_page(url, html_content);
  
         // Извлекаем ссылки из загруженной страницы и добавляем их в очередь
-        auto links = extract_links(html_content);
+        auto links = extract_links(html_content, url);
         lock.lock();
         for (const auto& link : links) {
             url_queue.push({link, current_depth + 1}); // Добавляем новые ссылки в очередь с увеличенной глубиной
