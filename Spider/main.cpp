@@ -181,26 +181,20 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                         // Обработка ссылок
                         try {
                             // Проверяем, начинается ли URL с https://
-                            if (!is_absolute_url(location_value)) {
+                            if (!is_absolute_url(url)) {
                                 // абсолютный URL
-                                auto parse_result = boost::urls::parse_absolute_uri(location_value); //парсим url
-                                if (!parse_result) {
-                                    throw std::runtime_error("Некорректный абсолютный URL");
-                                }
+                                auto parse_result = boost::urls::parse_absolute_uri(url); //парсим url
                                 boost::urls::url absolute_url = parse_result.value(); 
                                 // Перед рекурсивным вызовом обновляем полный URL
                                 std::string new_url = absolute_url.buffer(); 
                                 return load_page(new_url, redirect_count + 1);
                             } else {
-                                // относительный URL
-                                auto parse_result = boost::urls::parse_relative_ref(location_value);
-                                if (!parse_result) {
-                                    throw std::runtime_error("Некорректная относительная ссылка");
-                                }
-                                boost::urls::url base_url = boost::urls::parse_uri(url).value();
-                                auto resolved_url = base_url;
-                                resolved_url.resolve(parse_result.value());//Разрешаем относительный путь относительно базового URL.
-                                std::string new_url = resolved_url.buffer(); //Получаем полный url
+                                //относительный URL
+                                auto parse_result =  boost::urls::parse_uri(url);
+                                boost::urls::url base_url = parse_result.value();
+                                auto location_view = boost::urls::parse_relative_ref(location_value);
+                                base_url.resolve(location_view.value());
+                                std::string new_url = base_url.buffer();
                                 return load_page(new_url, redirect_count + 1);
                             }
 
@@ -260,23 +254,17 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                             if (!is_absolute_url(location_value)) {
                                 // абсолютный URL
                                 auto parse_result = boost::urls::parse_absolute_uri(location_value); //парсим url
-                                if (!parse_result) {
-                                    throw std::runtime_error("Некорректный абсолютный URL");
-                                }
                                 boost::urls::url absolute_url = parse_result.value(); 
                                 // Перед рекурсивным вызовом обновляем полный URL
                                 std::string new_url = absolute_url.buffer(); 
                                 return load_page(new_url, redirect_count + 1);
                             } else {
                                 // относительный URL
-                                auto parse_result = boost::urls::parse_relative_ref(location_value);
-                                if (!parse_result) {
-                                    throw std::runtime_error("Некорректная относительная ссылка");
-                                }
-                                boost::urls::url base_url = boost::urls::parse_uri(url).value();
-                                auto resolved_url = base_url;
-                                resolved_url.resolve(parse_result.value());//Разрешаем относительный путь относительно базового URL.
-                                std::string new_url = resolved_url.buffer(); //Получаем полный url
+                                auto parse_result =  boost::urls::parse_uri(url);
+                                boost::urls::url base_url = parse_result.value();
+                                auto location_view = boost::urls::parse_relative_ref(location_value);
+                                base_url.resolve(location_view.value());
+                                std::string new_url = base_url.buffer();
                                 return load_page(new_url, redirect_count + 1);
                             }
 
@@ -311,14 +299,13 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
 // Функция для объединения базового URL с относительной ссылкой
 std::string resolve_relative_link(const std::string& base_url_str, const std::string& link) {
     try {
-        auto parse_result = boost::urls::parse_relative_ref(link);
-        if (!parse_result) return link; // если не удалось распарсить — возвращаем как есть
-        boost::urls::url base_url = boost::urls::parse_uri(base_url_str).value();
-        auto resolved_url = base_url;
-        resolved_url.resolve(parse_result.value());
-        std::string new_url = resolved_url.buffer(); //Получаем полный url
+        auto parse_result = boost::urls::parse_uri(base_url_str);
+        if (!parse_result) return link;
+        boost::urls::url base_url = parse_result.value();
+        auto location_view = boost::urls::parse_relative_ref(link);
+        base_url.resolve(location_view.value());
+        std::string new_url = base_url.buffer();
         return new_url;
-
     } catch (...) {
         return link; // В случае ошибок возвращаем исходную ссылку
     }
