@@ -95,7 +95,7 @@ auto should_ignore_link = [](const std::string& url) {
 
 // Функция для проверки, является ли ссылка абсолютной
 bool is_absolute_url(const std::string& url) {
-    return url.find("https://") == 0 || url.find("http://");
+    return url.find("https://") == 0 || url.find("http://") == 0;
 }
 
 // Функция для загрузки страницы
@@ -181,7 +181,7 @@ std::string load_page(const std::string& url, int redirect_count = 0) {
                         // Обработка ссылок
                         try {
                             // Проверяем, начинается ли URL с https://
-                            if (!is_absolute_url(url)) {
+                            if (!is_absolute_url(location_value)) {
                                 // абсолютный URL
                                 auto parse_result = boost::urls::parse_absolute_uri(url); //парсим url
                                 boost::urls::url absolute_url = parse_result.value(); 
